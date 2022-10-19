@@ -2,6 +2,7 @@
 #include<unordered_map>
 #include<map>
 #include<vector>
+#include<math.h>
 using namespace std;
 
 struct detection{
@@ -39,7 +40,7 @@ vector<float> process_tensor(vector<float>&in_ptr, int in_depth, int in_height, 
     return out_ptr;
 }
 
-void load_anchors(vector<vector<vector<vector<int>>>>&anchors_for_images){
+void load_anchors(vector<vector<vector<vector<float>>>>&anchors_for_images){
 
 }
 
@@ -66,6 +67,69 @@ vector<int> flatten(vector<int>in){
 
 vector<int> NMS(){
 
+}
+
+vector<vector<float>> box_to_picture_clip(vector<int>idxs, vector<float>&bbox_regression_level, int len_dim, int img_num, 
+vector<vector<float>>&allboxes, int image_size){
+     
+     float bbox_xform_clip = 4.135166556742356; //it needs a function later handle
+     vector<int>weights = {1,1,1,1};
+     int start = img_num*len_dim;
+     int end = (img_num+1)*len_dim;
+     int sz = idxs.size();
+     vector<vector<float>>rel_codes;
+     vector<vector<float>>boxes(sz, vector<float>(4));
+     vector<vector<float>>res(sz, vector<float>(4));
+     for(int i=0; i<sz;i++){
+        int t = idxs[i];
+        boxes[i] = allboxes[t];// is this are as the order with the original progrm? 
+        vector<float>tmp(bbox_regression_level.begin()+start+t*4, bbox_regression_level.begin()+start+(t+1)*4);
+        rel_codes.push_back(tmp);
+        //please verify it later
+     }
+
+     vector<float>widths(sz);
+     vector<float>heights(sz);
+     vector<float>ctr_x(sz);
+     vector<float>ctr_y(sz);
+     for(int i=0; i<sz; i++){
+        widths[i] = boxes[i][2] - boxes[i][0];
+        heights[i] = boxes[i][3] - boxes[i][1];
+        ctr_x[i] = boxes[i][0] + 0.5*widths[i];
+        ctr_y[i] = boxes[i][1] + 0.5*heights[i];
+     }
+
+     vector<float>dx(sz);
+     vector<float>dy(sz);
+     vector<float>dw(sz);
+     vector<float>dh(sz);
+
+     for(int i=0; i<sz; i++){
+        dx[i] = rel_codes[i][0]/weights[0];
+        dy[i] = rel_codes[i][1]/weights[1];
+        dw[i] = min(rel_codes[i][2]/weights[2], bbox_xform_clip);
+        dh[i] = min(rel_codes[i][3]/weights[3], bbox_xform_clip);
+     }
+
+     vector<float>pred_ctr_x(sz);
+     vector<float>pred_ctr_y(sz);
+     vector<float>pred_w(sz);
+     vector<float>pred_h(sz);
+
+     for(int i=0; i<sz; i++){
+        pred_ctr_x[i] = dx[i]*widths[i]+ctr_x[i];
+        pred_ctr_y[i] = dy[i]*heights[i]+ctr_y[i];
+        pred_w[i] = exp(dw[i])*widths[i];
+        pred_h[i] = exp(dh[i])*heights[i];
+     }
+     for(int i=0; i<sz; i++){
+       res[i][0] = min(max(pred_ctr_x[i] - pred_w[i]*0.5, 0.0), (double)image_size);
+       res[i][1] = min(max(pred_ctr_y[i] - pred_h[i]*0.5, 0.0), (double)image_size);
+       res[i][2] = min(max(pred_ctr_x[i] + pred_w[i]*0.5, 0.0), (double)image_size);
+       res[i][3] = min(max(pred_ctr_y[i] + pred_h[i]*0.5, 0.0), (double)image_size);
+     }
+
+     return res;
 }
 
 void find_topk_num_bigger_than_threshold(vector<float>&scores_per_level, vector<pair<float,int>>&vals_idxs,
@@ -111,7 +175,7 @@ vector<float>&head14)
 
     /*[[[90000,4],[22500,4],[5625,4],[1521,4],[441,4]],
     [[90000,4],[22500,4],[5625,4],[1521,4],[441,4]]]*/
-    vector<vector<vector<vector<int>>>>anchors_for_images;
+    vector<vector<vector<vector<float>>>>anchors_for_images;
     
     load_anchors(anchors_for_images);
     int in_depth = 2376;
@@ -160,15 +224,16 @@ vector<float>&head14)
         find_anchors_labels(anchor_idxs, labels_per_level, vals_idxs);
   
         //convert to the predicted box and clip it
-        vector<vector<int>>anchors_per_level = anchors_for_images[i][j];
-        vector<vector<float>>boxes_per_level(sz_id);
-        box_to_picture_clip(bbox_regression[j], dims_boxes[j], i, anchors_per_level, image_size);
+        vector<vector<float>>anchors_per_level = anchors_for_images[i][j];
+        vector<vector<float>>boxes_per_level(sz_id, vector<float>(4));
+
+        boxes_per_level = box_to_picture_clip(anchor_idxs, bbox_regression[j], dims_boxes[j], i, anchors_per_level, image_size);
         
         // vector<vector<float>>IB = clip_boxes_to_image();
         
-        image_boxes.insert(image_boxes.end(), IB.begin(), IB.end());
-        image_scores.insert(image_scores.end(), tmpvalue.begin(), tmpvalue.end());
-        image_labels.insert(image_labels.end(), lables_per_level.begin(), lables_per_level.end());
+        image_boxes.insert(image_boxes.end(), boxes_per_level.begin(), boxes_per_level.end());
+        image_scores.insert(image_scores.end(), scores_per_level.begin(), scores_per_level.end());
+        image_labels.insert(image_labels.end(), labels_per_level.begin(), labels_per_level.end());
       }
 
       vector<int>keep_idxs = NMS(image_boxes, image_scores, image_labels, nms_thresh);
