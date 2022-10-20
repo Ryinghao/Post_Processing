@@ -3,10 +3,11 @@
 #include<map>
 #include<vector>
 #include<math.h>
+#include<NMS.cpp>
 using namespace std;
 
 struct detection{
-    vector<float>boxes;
+    vector<vector<float>>boxes;
     vector<float>scores;
     vector<int>labels;
 };
@@ -57,17 +58,13 @@ vector <float> sigmoid (const vector<float>& m1, int img_num, int VECTOR_SIZE) {
     return output;
 }
 
-vector<int> find_index(vector<int>&in, vector<int>idxs){
-    return in;
-}
+
 
 vector<int> flatten(vector<int>in){
     return in;
 }
 
-vector<int> NMS(){
 
-}
 
 vector<vector<float>> box_to_picture_clip(vector<int>idxs, vector<float>&bbox_regression_level, int len_dim, int img_num, 
 vector<vector<float>>&allboxes, int image_size){
@@ -162,6 +159,15 @@ void find_anchors_labels(vector<int>&anchor_idxs, vector<int>&labels_per_level, 
           labels_per_level[i] = b%num_classes;
      }
 }
+
+template <typename T>
+T& find_index(T&in, vector<int>&idxs){
+    T res;
+    for(auto id:idxs){
+      res.push_back(in[id]);
+    }
+    return res;
+}
 void post_process(vector<float>&images, vector<float>&feat0, vector<float>&feat1, 
 vector<float>&feat2, vector<float>&feat3, vector<float>&feat4, vector<float>&head00, 
 vector<float>&head01, vector<float>&head02, vector<float>&head03, vector<float>&head04, 
@@ -198,7 +204,7 @@ vector<float>&head14)
     vector<int>image_labels;
 
     //some parameters
-    int nms_thresh = 0.5;
+    float nms_thresh = 0.5;
     int topk_num = 1000;
     float score_thresh = 0.05; 
     int level_num=5;
@@ -208,6 +214,7 @@ vector<float>&head14)
     vector<int>dims_boxes={90000*4, 22500*4, 5625*4, 1521*4, 441*4};
     for(int i=0; i<num_images; i++){
       for(int j=0; j<level_num; j++){
+
         /*choose the value which is bigger than threshold and sort the value and 
         find the index*/
         vector<pair<float,int>>vals_idxs;
@@ -235,11 +242,23 @@ vector<float>&head14)
         image_scores.insert(image_scores.end(), scores_per_level.begin(), scores_per_level.end());
         image_labels.insert(image_labels.end(), labels_per_level.begin(), labels_per_level.end());
       }
+      
+      int offset = image_size+1;
+      int final_temp_n = image_labels.size();
+      vector<vector<float>>image_boxes_nms(final_temp_n, vector<float>(4));
+      
+      for(int i=0; i<final_temp_n; i++){
+          int offset_temp = offset*image_labels[i];
+          image_boxes_nms[i][0] = image_boxes[i][0]+offset_temp;
+          image_boxes_nms[i][1] = image_boxes[i][1]+offset_temp;
+          image_boxes_nms[i][2] = image_boxes[i][2]+offset_temp;
+          image_boxes_nms[i][3] = image_boxes[i][3]+offset_temp;
+      }
 
-      vector<int>keep_idxs = NMS(image_boxes, image_scores, image_labels, nms_thresh);
-      detection dec(find_index(image_boxes, keep_idxs), find_index(image_scores, keep_idxs), 
-      find_index(image_labels, keep_idxs));
-
+      vector<int>keep_idxs = NMS(image_boxes_nms, image_scores, nms_thresh);
+      find_index(image_boxes, keep_idxs);
+      detection dec = {find_index(image_boxes, keep_idxs), find_index(image_scores, keep_idxs),
+      find_index(image_labels, keep_idxs)};
       res.push_back(dec);
     } 
 
